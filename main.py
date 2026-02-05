@@ -1,12 +1,12 @@
 from fastapi import FastAPI, Request, HTTPException, Response, Depends, Body, Cookie, status
 from datetime import datetime, timezone, timedelta
-import jwt
-import time
 from pydantic import BaseModel
-import sqlite3
-import secrets
+from dotenv import load_dotenv
+import sqlite3, secrets, os, jwt, time
 
-JWT_SECRET = "secret12343902ijefdjdfskfjldkjvxPMIasd:I£Nsdf)"
+
+load_dotenv()
+JWT_SECRET = os.environ["JWT_SECRET"]
 conn = sqlite3.connect('database.db')
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
@@ -35,8 +35,10 @@ cursor.execute("""
 """)
 conn.commit()
 
+
 def generate_refresh_token():
     return secrets.token_urlsafe(64)
+
 
 def generate_jwt(user: sqlite3.Row):
     encoded_jwt = jwt.encode({"id": user["id"], "username": user["username"], "role": user["role"], "isPremiumUser": user["isPremiumUser"], "accountDisabled": user["accountDisabled"], "exp": datetime.now(tz=timezone.utc) + timedelta(minutes=30)}, JWT_SECRET, algorithm="HS256")
@@ -56,6 +58,7 @@ def validate_jwt(jwt_token):
 class User(BaseModel):
     username: str
     password: str
+
 
 async def protected_endpoint(request: Request):
     auth_header = request.headers.get("Authorization")
@@ -78,10 +81,12 @@ async def protected_endpoint(request: Request):
         raise HTTPException(status_code=403)
     return user
 
+
 app = FastAPI()
 @app.get("/")
 def read_root():
     return "Stuck? Try /docs"
+
 
 @app.get("/protected")
 async def protected_route(user=Depends(protected_endpoint)):
@@ -89,6 +94,7 @@ async def protected_route(user=Depends(protected_endpoint)):
         "message": "You're authenticated",
         "username": user["username"]
     }
+
 
 @app.post("/login")
 async def user_login(user: User, response: Response):
@@ -137,7 +143,6 @@ async def user_login(jwt_token):
 async def refresh_token(response: Response,refresh_token: str = Cookie(None)):
     cursor.execute("SELECT * FROM refresh_tokens WHERE token = ?", (refresh_token,))
     result = cursor.fetchone()
-
     if not result:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     if datetime.now(timezone.utc)> datetime.fromisoformat(result["expires_at"]):
@@ -154,7 +159,4 @@ async def refresh_token(response: Response,refresh_token: str = Cookie(None)):
     conn.commit()
     new_access_token = generate_jwt(user)
     response.set_cookie(key="refresh_token", value=new_refresh_token, httponly=True, secure=False, samesite="strict", path="/refresh")
-    return{
-            "access_token": new_access_token,
-            "token_type": "bearer"
-        }
+    return{"access_token": new_access_token, "token_type": "bearer"}
